@@ -2,7 +2,6 @@
 # Standard Library
 # ============================================================
 
-from app.models.review_models.review_model import Review
 from datetime import date
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -13,13 +12,13 @@ from uuid import UUID
 # ============================================================
 
 from sqlalchemy import (
+    CheckConstraint,
     Date,
     Enum,
     ForeignKey,
     Numeric,
     String,
     Text,
-    CheckConstraint,
 )
 
 from sqlalchemy.orm import (
@@ -43,8 +42,13 @@ if TYPE_CHECKING:
     from app.models.users_models.users import User
     from app.models.property_models.property import Property
     from app.models.booking_models.booking_room import BookingRoom
+    from app.models.booking_models.booking_history import BookingHistory
+    from app.models.booking_models.booking_cancellation import BookingCancellation
     from app.models.payment_models.payment import Payment
     from app.models.payment_models.invoice import Invoice
+    from app.models.review_models.review_model import Review
+
+
 # ============================================================
 # Booking Model
 # ============================================================
@@ -58,10 +62,15 @@ class Booking(BaseTable):
 
     __table_args__ = (
         CheckConstraint(
-            "guest_count > 0",
-            name="ck_booking_guest_count_positive",
+            "adult_count > 0",
+            name="ck_booking_adult_count",
+        ),
+        CheckConstraint(
+            "child_count >= 0",
+            name="ck_booking_child_count",
         ),
     )
+
     # ============================================================
     # Booking Ownership
     # ============================================================
@@ -90,6 +99,7 @@ class Booking(BaseTable):
         nullable=False,
         index=True,
     )
+
     # ============================================================
     # Stay Information
     # ============================================================
@@ -108,7 +118,11 @@ class Booking(BaseTable):
     # Guest Information
     # ============================================================
 
-    guest_count: Mapped[int] = mapped_column(
+    adult_count: Mapped[int] = mapped_column(
+        nullable=False,
+    )
+
+    child_count: Mapped[int] = mapped_column(
         nullable=False,
     )
 
@@ -177,31 +191,47 @@ class Booking(BaseTable):
 
     customer: Mapped["User"] = relationship(
         foreign_keys=[customer_id],
+        
     )
 
     property: Mapped["Property"] = relationship(
         foreign_keys=[property_id],
+        
     )
 
     booking_rooms: Mapped[list["BookingRoom"]] = relationship(
         back_populates="booking",
         cascade="all, delete-orphan",
+        
+    )
+
+    booking_history: Mapped[list["BookingHistory"]] = relationship(
+        back_populates="booking",
+        cascade="all, delete-orphan",
+        
     )
 
     payments: Mapped[list["Payment"]] = relationship(
         back_populates="booking",
         cascade="all, delete-orphan",
+        
     )
 
     invoice: Mapped["Invoice | None"] = relationship(
         back_populates="booking",
         uselist=False,
         cascade="all, delete-orphan",
+        
     )
 
-
-    review: Mapped["Review"] = relationship(
+    cancellation: Mapped["BookingCancellation | None"] = relationship(
         back_populates="booking",
         uselist=False,
-        lazy="select",
+        cascade="all, delete-orphan",
+    )
+
+    review: Mapped["Review | None"] = relationship(
+        back_populates="booking",
+        uselist=False,
+
     )

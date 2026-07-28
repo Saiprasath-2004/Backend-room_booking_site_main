@@ -39,7 +39,6 @@ if TYPE_CHECKING:
     from app.models.users_models.users import User
 
 
-
 # ============================================================
 # Booking Cancellation Model
 # ============================================================
@@ -50,7 +49,6 @@ class BookingCancellation(BaseTable):
     """
 
     __tablename__ = "booking_cancellations"
-
 
     # ============================================================
     # Booking Reference
@@ -66,14 +64,11 @@ class BookingCancellation(BaseTable):
         index=True,
     )
 
-
     # ============================================================
     # Cancellation Information
     # ============================================================
 
-    cancellation_type: Mapped[
-        CancellationType
-    ] = mapped_column(
+    cancellation_type: Mapped[CancellationType] = mapped_column(
         Enum(
             CancellationType,
             name="cancellation_type_enum",
@@ -90,9 +85,7 @@ class BookingCancellation(BaseTable):
     # Refund Information
     # ============================================================
 
-    refund_status: Mapped[
-        RefundStatus
-    ] = mapped_column(
+    refund_status: Mapped[RefundStatus] = mapped_column(
         Enum(
             RefundStatus,
             name="refund_status_enum",
@@ -120,13 +113,12 @@ class BookingCancellation(BaseTable):
         index=True,
     )
 
-
     # ============================================================
     # Relationships
     # ============================================================
 
     booking: Mapped["Booking"] = relationship(
-        foreign_keys=[booking_id],
+        back_populates="cancellation",
     )
 
     cancelled_by_user: Mapped["User | None"] = relationship(

@@ -17,6 +17,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    model_validator,
 )
 
 # ============================================================
@@ -25,9 +26,9 @@ from pydantic import (
 
 from app.common.enums.booking_enums.booking_enums import (
     BookingStatus,
+    CancellationType,
     PaymentStatus,
     RefundStatus,
-    CancellationType,
 )
 
 # ============================================================
@@ -40,6 +41,7 @@ class BookingRoomRequest(BaseModel):
     """
 
     room_id: UUID
+
 
 # ============================================================
 # Create Booking Request
@@ -56,18 +58,38 @@ class CreateBookingRequest(BaseModel):
 
     check_out_date: date
 
-    guest_count: int = Field(
+    adult_count: int = Field(
         gt=0,
-        description="Total number of guests.",
     )
 
-    special_requests: str | None = None
+    child_count: int = Field(
+        default=0,
+        ge=0,
+    )
+
+    special_requests: str | None = Field(
+        default=None,
+        max_length=1000,
+    )
 
     rooms: list[BookingRoomRequest] = Field(
         min_length=1,
     )
 
+    @model_validator(mode="after")
+    def validate_dates(self):
 
+        if self.check_out_date <= self.check_in_date:
+            raise ValueError(
+                "Check-out date must be after check-in date."
+            )
+
+        return self
+
+
+# ============================================================
+# Update Booking Request
+# ============================================================
 
 class BookingUpdate(BaseModel):
 
@@ -75,16 +97,40 @@ class BookingUpdate(BaseModel):
 
     check_out_date: date | None = None
 
-    guest_count: int | None = Field(
+    adult_count: int | None = Field(
         default=None,
         gt=0,
     )
 
-    special_requests: str | None = None
+    child_count: int | None = Field(
+        default=None,
+        ge=0,
+    )
+
+    special_requests: str | None = Field(
+        default=None,
+        max_length=1000,
+    )
+
+    @model_validator(mode="after")
+    def validate_dates(self):
+
+        if (
+            self.check_in_date
+            and self.check_out_date
+            and self.check_out_date <= self.check_in_date
+        ):
+            raise ValueError(
+                "Check-out date must be after check-in date."
+            )
+
+        return self
 
     model_config = ConfigDict(
         from_attributes=True,
     )
+
+
 # ============================================================
 # Booking Room Response
 # ============================================================
@@ -107,6 +153,7 @@ class BookingRoomResponse(BaseModel):
         from_attributes=True,
     )
 
+
 # ============================================================
 # Booking Summary Response
 # ============================================================
@@ -126,7 +173,9 @@ class BookingSummaryResponse(BaseModel):
 
     check_out_date: date
 
-    guest_count: int
+    adult_count: int
+
+    child_count: int
 
     total_amount: Decimal
 
@@ -137,6 +186,7 @@ class BookingSummaryResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
     )
+
 
 # ============================================================
 # Booking Response
@@ -159,7 +209,9 @@ class BookingResponse(BaseModel):
 
     check_out_date: date
 
-    guest_count: int
+    adult_count: int
+
+    child_count: int
 
     subtotal: Decimal
 
@@ -180,6 +232,7 @@ class BookingResponse(BaseModel):
     model_config = ConfigDict(
         from_attributes=True,
     )
+
 
 # ============================================================
 # Booking History Response
@@ -217,6 +270,7 @@ class CancelBookingRequest(BaseModel):
         max_length=500,
     )
 
+
 # ============================================================
 # Booking Cancellation Response
 # ============================================================
@@ -226,7 +280,7 @@ class BookingCancellationResponse(BaseModel):
     Response schema for booking cancellation.
     """
 
-    cancellation_type:  CancellationType
+    cancellation_type: CancellationType
 
     reason: str
 
@@ -242,6 +296,13 @@ class BookingCancellationResponse(BaseModel):
         from_attributes=True,
     )
 
+
+# ============================================================
+# Common Message Response
+# ============================================================
+
 class BookingMessageResponse(BaseModel):
+
     success: bool
+
     message: str

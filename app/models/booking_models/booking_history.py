@@ -35,6 +35,7 @@ if TYPE_CHECKING:
     from app.models.booking_models.booking import Booking
     from app.models.users_models.users import User
 
+
 # ============================================================
 # Booking History Model
 # ============================================================
@@ -60,10 +61,18 @@ class BookingHistory(BaseTable):
     )
 
     # ============================================================
-    # Status Information
+    # Status Transition
     # ============================================================
 
-    booking_status: Mapped[BookingStatus] = mapped_column(
+    old_status: Mapped[BookingStatus] = mapped_column(
+        Enum(
+            BookingStatus,
+            name="booking_status_enum",
+        ),
+        nullable=False,
+    )
+
+    new_status: Mapped[BookingStatus] = mapped_column(
         Enum(
             BookingStatus,
             name="booking_status_enum",
@@ -98,7 +107,7 @@ class BookingHistory(BaseTable):
     # ============================================================
 
     booking: Mapped["Booking"] = relationship(
-        foreign_keys=[booking_id],
+        back_populates="booking_history",
     )
 
     changed_by_user: Mapped["User | None"] = relationship(

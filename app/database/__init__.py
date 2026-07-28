@@ -72,6 +72,12 @@ from app.models.payment_models.invoice import Invoice
 from app.models.favorites_models.favorites import Favorite
 
 # ============================================================
+# Review Models
+# ============================================================
+
+
+from app.models.review_models.review_model import Review
+# ============================================================
 # Exported Symbols
 # ============================================================
 
@@ -114,4 +120,7 @@ __all__ = [
 
     # Favorites
     "Favorite",
+
+    # Review Models
+    "Review",
 ]

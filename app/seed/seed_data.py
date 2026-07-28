@@ -60,10 +60,10 @@ PERMISSIONS = [
     # Booking
     ("booking.create", "booking", "Create Booking"),
     ("booking.view", "booking", "View Booking"),
-    ("booking.update", "booking", "Update Booking"),
     ("booking.cancel", "booking", "Cancel Booking"),
     ("booking.checkin", "booking", "Check-In Guest"),
     ("booking.checkout", "booking", "Check-Out Guest"),
+    ("booking.complete", "booking", "Complete Booking"),
 
     # Payment
     ("payment.view", "payment", "View Payment"),
@@ -108,6 +108,7 @@ ROLE_PERMISSIONS = {
         "booking.view",
         "booking.checkin",
         "booking.checkout",
+        "booking.complete",
 
         "payment.view",
 
@@ -195,7 +196,9 @@ async def seed_database(
 
         for name, module, description in PERMISSIONS:
 
-            if name not in existing_permissions:
+            permission = existing_permissions.get(name)
+
+            if permission is None:
 
                 permission = Permission(
                     name=name,
@@ -208,6 +211,12 @@ async def seed_database(
                 db.add(permission)
 
                 existing_permissions[name] = permission
+
+            else:
+
+                permission.module = module
+                permission.description = description
+                permission.updated_by = "SYSTEM"
 
         # ====================================================
         # Flush IDs
