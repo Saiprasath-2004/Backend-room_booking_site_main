@@ -2,10 +2,9 @@
 # Standard Library
 # ============================================================
 
+from uuid import UUID
 from datetime import datetime
 from decimal import Decimal
-from uuid import UUID
-
 # ============================================================
 # Third Party
 # ============================================================
@@ -21,11 +20,10 @@ from pydantic import (
 # ============================================================
 
 from app.common.enums.payment_enums.payment_enums import (
-    InvoiceStatus,
     PaymentGateway,
     PaymentMethod,
     PaymentStatus,
-    RefundStatus,
+    InvoiceStatus,
 )
 
 # ============================================================
@@ -34,7 +32,8 @@ from app.common.enums.payment_enums.payment_enums import (
 
 class CreatePaymentRequest(BaseModel):
     """
-    Request schema for initiating a payment.
+    Request schema for initiating a payment
+    for an existing booking.
     """
 
     booking_id: UUID
@@ -49,48 +48,56 @@ class CreatePaymentRequest(BaseModel):
 
 
 # ============================================================
-# Verify Payment Request
+# Complete Payment Request
 # ============================================================
-
-class VerifyPaymentRequest(BaseModel):
+class CompletePaymentRequest(BaseModel):
     """
-    Request schema for verifying a payment.
+    Request schema used by the mock payment gateway
+    to complete a payment successfully.
     """
 
-    gateway_transaction_id: str = Field(
+    payment_reference: str = Field(
         min_length=1,
         max_length=255,
     )
 
-    gateway_response: str | None = None
+    gateway_payment_id: str = Field(
+        min_length=1,
+        max_length=255,
+    )
+
+    gateway_response: str | None = Field(
+        default=None,
+        max_length=5000,
+    )
 
     model_config = ConfigDict(
         from_attributes=True,
     )
 
-
 # ============================================================
-# Refund Request
+# Payment Failure Request
 # ============================================================
 
-class RefundRequest(BaseModel):
+class PaymentFailureRequest(BaseModel):
     """
-    Request schema for processing a refund.
+    Request schema used by the mock payment gateway
+    to simulate a failed payment.
     """
 
-    refund_amount: Decimal = Field(
-        gt=0,
-    )
-
-    reason: str = Field(
+    failure_reason: str = Field(
         min_length=5,
         max_length=500,
     )
 
+    gateway_response: str | None = Field(
+        default=None,
+        max_length=5000,
+    )
+
     model_config = ConfigDict(
         from_attributes=True,
     )
-
 
 # ============================================================
 # Payment Gateway Response
@@ -98,14 +105,15 @@ class RefundRequest(BaseModel):
 
 class PaymentGatewayResponse(BaseModel):
     """
-    Response returned after payment initiation.
+    Response returned immediately after creating
+    a payment through the mock gateway.
     """
 
     payment_reference: str
 
-    payment_url: str
+    gateway_order_id: str
 
-    expires_at: datetime | None = None
+    payment_status: PaymentStatus
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -118,7 +126,8 @@ class PaymentGatewayResponse(BaseModel):
 
 class PaymentSummaryResponse(BaseModel):
     """
-    Summary response for a payment.
+    Lightweight payment response used
+    when listing payments.
     """
 
     id: UUID
@@ -140,90 +149,6 @@ class PaymentSummaryResponse(BaseModel):
     paid_at: datetime | None
 
     created_at: datetime
-
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
-
-
-# ============================================================
-# Payment Response
-# ============================================================
-
-class PaymentResponse(BaseModel):
-    """
-    Detailed payment response.
-    """
-
-    id: UUID
-
-    booking_id: UUID
-
-    payment_reference: str
-
-    amount: Decimal
-
-    currency: str
-
-    payment_method: PaymentMethod
-
-    payment_gateway: PaymentGateway
-
-    payment_status: PaymentStatus
-
-    gateway_transaction_id: str | None
-
-    gateway_response: str | None
-
-    refund_status: RefundStatus
-
-    refund_amount: Decimal
-
-    paid_at: datetime | None
-
-    created_by: UUID | None = None
-
-    updated_by: UUID | None = None
-
-    created_at: datetime
-
-    updated_at: datetime
-
-    model_config = ConfigDict(
-        from_attributes=True,
-    )
-
-
-# ============================================================
-# Invoice Response
-# ============================================================
-
-class InvoiceResponse(BaseModel):
-    """
-    Invoice response.
-    """
-
-    id: UUID
-
-    booking_id: UUID
-
-    invoice_number: str
-
-    invoice_status: InvoiceStatus
-
-    invoice_amount: Decimal
-
-    currency: str
-
-    generated_at: datetime
-
-    created_by: UUID | None = None
-
-    updated_by: UUID | None = None
-
-    created_at: datetime
-
-    updated_at: datetime
 
     model_config = ConfigDict(
         from_attributes=True,
@@ -243,10 +168,108 @@ class RevenueSummaryResponse(BaseModel):
 
     total_revenue: Decimal
 
-    total_refunds: Decimal
-
-    net_revenue: Decimal
+    average_payment_amount: Decimal
 
     model_config = ConfigDict(
         from_attributes=True,
     )
+    
+# ============================================================
+# Payment Response
+# ============================================================
+
+class PaymentResponse(BaseModel):
+    """
+    Detailed payment response.
+    """
+
+    id: UUID
+
+    booking_id: UUID
+
+    user_id: UUID
+
+    payment_reference: str
+
+    amount: Decimal
+
+    currency: str
+
+    payment_method: PaymentMethod
+
+    payment_gateway: PaymentGateway
+
+    payment_status: PaymentStatus
+
+    gateway_order_id: str | None
+
+    gateway_payment_id: str | None
+
+    gateway_response: str | None
+
+    failure_reason: str | None
+
+    paid_at: datetime | None
+
+    created_by: str | None
+
+    updated_by: str | None
+
+    created_at: datetime
+
+    updated_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+# ============================================================
+# Invoice Response
+# ============================================================
+
+class InvoiceResponse(BaseModel):
+    """
+    Detailed invoice response.
+    """
+
+    id: UUID
+
+    booking_id: UUID
+
+    invoice_number: str
+
+    invoice_status: InvoiceStatus
+
+    invoice_amount: Decimal
+
+    currency: str
+
+    generated_at: datetime
+
+    created_by: str | None
+
+    updated_by: str | None
+
+    created_at: datetime
+
+    updated_at: datetime
+
+    model_config = ConfigDict(
+        from_attributes=True,
+    )
+
+
+# ============================================================
+# Payment Message Response
+# ============================================================
+
+class PaymentMessageResponse(BaseModel):
+    """
+    Generic success/message response
+    for payment operations.
+    """
+
+    success: bool
+
+    message: str

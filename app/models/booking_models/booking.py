@@ -221,7 +221,6 @@ class Booking(BaseTable):
         back_populates="booking",
         uselist=False,
         cascade="all, delete-orphan",
-        
     )
 
     cancellation: Mapped["BookingCancellation | None"] = relationship(

@@ -115,19 +115,19 @@ def verify_access_token(
     token: str,
 ) -> dict:
     """
-    Verify an access token and return its payload.
+        Verify an access token and return its payload.
 
-    Args:
-        token: JWT access token.
+        Args:
+            token: JWT access token.
 
-    Returns:
-        Decoded JWT payload.
+        Returns:
+            Decoded JWT payload.
 
-    Raises:
-        HTTPException:
-            If the token is invalid,
-            expired,
-            or not an access token.
+        Raises:
+            HTTPException:
+                If the token is invalid,
+                expired,
+                or not an access token.
     """
 
     try:

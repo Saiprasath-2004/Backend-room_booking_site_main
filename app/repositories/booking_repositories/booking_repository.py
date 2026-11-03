@@ -180,10 +180,16 @@ class BookingRepository:
         """
         try:
             self.db.add(
-                booking_history,
+                    booking_history,
             )
 
             await self.db.flush()
+
+            await self.db.refresh(
+                    booking_history,
+            )
+
+            return booking_history
 
         except SQLAlchemyError:
             await self.db.rollback()

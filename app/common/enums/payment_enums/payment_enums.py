@@ -64,24 +64,6 @@ class PaymentGateway(str, Enum):
 
 
 # ============================================================
-# Refund Status
-# ============================================================
-
-class RefundStatus(str, Enum):
-    """
-    Refund processing status.
-    """
-
-    NOT_APPLICABLE = "NOT_APPLICABLE"
-
-    PENDING = "PENDING"
-
-    COMPLETED = "COMPLETED"
-
-    FAILED = "FAILED"
-
-
-# ============================================================
 # Invoice Status
 # ============================================================
 

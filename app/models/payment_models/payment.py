@@ -12,12 +12,14 @@ from uuid import UUID
 # ============================================================
 
 from sqlalchemy import (
-    DateTime,
+    CheckConstraint,
     Enum,
     ForeignKey,
     Numeric,
     String,
     Text,
+    DateTime,
+    UniqueConstraint,
 )
 
 from sqlalchemy.orm import (
@@ -36,12 +38,12 @@ from app.common.enums.payment_enums.payment_enums import (
     PaymentGateway,
     PaymentMethod,
     PaymentStatus,
-    RefundStatus,
 )
 
 if TYPE_CHECKING:
     from app.models.booking_models.booking import Booking
     from app.models.users_models.users import User
+
 
 # ============================================================
 # Payment Model
@@ -54,8 +56,22 @@ class Payment(BaseTable):
 
     __tablename__ = "payments"
 
+    __table_args__ = (
+
+        UniqueConstraint(
+            "payment_reference",
+            name="uq_payment_reference",
+        ),
+
+        CheckConstraint(
+            "amount > 0",
+            name="ck_payment_amount_positive",
+        ),
+
+    )
+
     # ============================================================
-    # Booking Reference
+    # Foreign Keys
     # ============================================================
 
     booking_id: Mapped[UUID] = mapped_column(
@@ -66,10 +82,6 @@ class Payment(BaseTable):
         nullable=False,
         index=True,
     )
-
-    # ============================================================
-    # Customer Reference
-    # ============================================================
 
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey(
@@ -102,10 +114,6 @@ class Payment(BaseTable):
         default="INR",
     )
 
-    # ============================================================
-    # Payment Method
-    # ============================================================
-
     payment_method: Mapped[PaymentMethod] = mapped_column(
         Enum(
             PaymentMethod,
@@ -136,7 +144,13 @@ class Payment(BaseTable):
     # Gateway Information
     # ============================================================
 
-    gateway_transaction_id: Mapped[str | None] = mapped_column(
+    gateway_order_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        unique=True,
+    )
+
+    gateway_payment_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
         unique=True,
@@ -147,27 +161,13 @@ class Payment(BaseTable):
         nullable=True,
     )
 
-    # ============================================================
-    # Refund Information
-    # ============================================================
-
-    refund_status: Mapped[RefundStatus] = mapped_column(
-        Enum(
-            RefundStatus,
-            name="refund_status_enum",
-        ),
-        nullable=False,
-        default=RefundStatus.NOT_APPLICABLE,
-    )
-
-    refund_amount: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2),
-        nullable=False,
-        default=Decimal("0.00"),
+    failure_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
     )
 
     # ============================================================
-    # Payment Time
+    # Payment Timestamp
     # ============================================================
 
     paid_at: Mapped[datetime | None] = mapped_column(

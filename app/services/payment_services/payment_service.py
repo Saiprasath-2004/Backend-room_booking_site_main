@@ -2,9 +2,13 @@
 # Standard Library
 # ============================================================
 
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import (
+    datetime,
+    timezone,
+)
+
 import uuid
+
 from uuid import UUID
 
 # ============================================================
@@ -17,52 +21,67 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # Local Imports
 # ============================================================
 
+# Repository
+from app.models.booking_models.booking_history import BookingHistory
 from app.repositories.payment_repositories.payment_repository import (
     PaymentRepository,
 )
 
+# Schemas
 from app.schema.payment_schema.payment_schemas import (
+    CompletePaymentRequest,
     CreatePaymentRequest,
     InvoiceResponse,
+    PaymentFailureRequest,
+    PaymentGatewayResponse,
+    PaymentMessageResponse,
     PaymentResponse,
     PaymentSummaryResponse,
-    RefundRequest,
     RevenueSummaryResponse,
-    VerifyPaymentRequest,
 )
 
+# Payment Exceptions
 from app.exceptions.payment_exceptions.payment_exceptions import (
     BookingPaymentAlreadyExistsException,
     InvoiceNotFoundException,
     InvalidPaymentStatusException,
-    InvalidRefundAmountException,
     PaymentAccessDeniedException,
     PaymentAlreadyCompletedException,
     PaymentAlreadyFailedException,
     PaymentNotFoundException,
-    PaymentVerificationFailedException,
-    RefundAlreadyProcessedException,
-    RefundNotAllowedException,
 )
 
+# Booking Exceptions
 from app.exceptions.booking_exceptions.booking_exceptions import (
     BookingNotFoundException,
 )
 
-from app.common.enums.payment_enums.payment_enums import (
-    InvoiceStatus,
-    PaymentStatus,
-    RefundStatus,
-)
-
+# Booking Enums
 from app.common.enums.booking_enums.booking_enums import (
     BookingStatus,
+    PaymentStatus as BookingPaymentStatus,
+)
+# Payment Enums
+from app.common.enums.payment_enums.payment_enums import (
+    InvoiceStatus,
+    PaymentStatus as PaymentTransactionStatus,
 )
 
-from app.models.payment_models.invoice import Invoice
-from app.models.payment_models.payment import Payment
 
-from app.models.users_models.users import User
+
+from app.models.payment_models.invoice import (
+    Invoice,
+)
+
+from app.models.payment_models.payment import (
+    Payment,
+)
+
+from app.models.users_models.users import (
+    User,
+)
+
+
 # ============================================================
 # Payment Service
 # ============================================================
@@ -80,9 +99,8 @@ class PaymentService:
             db,
         )
 
-
     # ============================================================
-    # Helper Methods
+    # Private Helper Methods
     # ============================================================
 
     async def generate_payment_reference(
@@ -93,13 +111,21 @@ class PaymentService:
         """
 
         return (
-            f"PAY-{uuid.uuid4().hex[:8].upper()}"
+            f"PAY-{uuid.uuid4().hex[:12].upper()}"
         )
 
 
-    # ============================================================
-    # Helper Methods
-    # ============================================================
+    async def generate_gateway_order_id(
+        self,
+    ) -> str:
+        """
+        Generates a mock payment gateway order ID.
+        """
+
+        return (
+            f"ORDER-{uuid.uuid4().hex[:12].upper()}"
+        )
+
 
     async def generate_invoice_number(
         self,
@@ -109,7 +135,7 @@ class PaymentService:
         """
 
         return (
-            f"INV-{uuid.uuid4().hex[:8].upper()}"
+            f"INV-{uuid.uuid4().hex[:12].upper()}"
         )
 
 
@@ -121,10 +147,14 @@ class PaymentService:
         self,
         request: CreatePaymentRequest,
         current_user: User,
-    ) -> PaymentResponse:
+    ) -> PaymentGatewayResponse:
         """
-        Creates a payment for a booking.
+        Creates a payment request for a booking.
         """
+
+        # ------------------------------------------------------------
+        # Validate Booking
+        # ------------------------------------------------------------
 
         booking = await self.repository.get_booking_by_id(
             request.booking_id,
@@ -132,37 +162,59 @@ class PaymentService:
 
         if booking is None:
             raise BookingNotFoundException()
-        
+
         if booking.customer_id != current_user.id:
             raise PaymentAccessDeniedException()
-        
+
         if booking.booking_status != BookingStatus.PENDING:
             raise InvalidPaymentStatusException()
-        
-        existing_payment = await self.repository.get_payment_by_booking(
-            booking.id,
+
+        # ------------------------------------------------------------
+        # Check Existing Payment
+        # ------------------------------------------------------------
+
+        existing_payment = (
+            await self.repository.get_payment_by_booking_id(
+                booking.id,
+            )
         )
 
         if existing_payment is not None:
             raise BookingPaymentAlreadyExistsException()
-        
+
+        # ------------------------------------------------------------
+        # Generate Payment Details
+        # ------------------------------------------------------------
+
         payment_reference = (
             await self.generate_payment_reference()
         )
 
+        gateway_order_id = (
+            await self.generate_gateway_order_id()
+        )
+
+        # ------------------------------------------------------------
+        # Create Payment
+        # ------------------------------------------------------------
+
         payment = Payment(
             booking_id=booking.id,
+            user_id=current_user.id,
             payment_reference=payment_reference,
+            gateway_order_id=gateway_order_id,
             amount=booking.total_amount,
             currency="INR",
             payment_method=request.payment_method,
             payment_gateway=request.payment_gateway,
-            payment_status=PaymentStatus.PENDING,
-            refund_status=RefundStatus.NOT_APPLICABLE,
-            refund_amount=Decimal("0.00"),
+            payment_status=PaymentTransactionStatus.PENDING,
             created_by=current_user.email,
-updated_by=current_user.email   
+            updated_by=current_user.email,
         )
+
+        # ------------------------------------------------------------
+        # Save Payment
+        # ------------------------------------------------------------
 
         try:
 
@@ -178,115 +230,222 @@ updated_by=current_user.email
 
             raise
 
-        return PaymentResponse(
-            id=payment.id,
-            booking_id=payment.booking_id,
+        # ------------------------------------------------------------
+        # Return Gateway Details
+        # ------------------------------------------------------------
+
+        return PaymentGatewayResponse(
             payment_reference=payment.payment_reference,
-            amount=payment.amount,
-            currency=payment.currency,
-            payment_method=payment.payment_method,
-            payment_gateway=payment.payment_gateway,
+            gateway_order_id=payment.gateway_order_id,
             payment_status=payment.payment_status,
-            gateway_transaction_id=payment.gateway_transaction_id,
-            gateway_response=payment.gateway_response,
-            refund_status=payment.refund_status,
-            refund_amount=payment.refund_amount,
-            paid_at=payment.paid_at,
         )
 
+
     # ============================================================
-    # Verify Payment
+    # Complete Payment
     # ============================================================
 
-    async def verify_payment(
+    async def complete_payment(
         self,
-        payment_id: UUID,
-        request: VerifyPaymentRequest,
+        request: CompletePaymentRequest,
         current_user: User,
     ) -> PaymentResponse:
         """
-        Verifies a payment transaction.
+        Completes a pending payment after successful gateway payment.
         """
-
-        payment = await self.repository.get_payment_by_id(
-            payment_id,
-        )
-
-        if payment is None:
-            raise PaymentNotFoundException()
-
-        booking = await self.repository.get_booking_by_id(
-        payment.booking_id,
-        )
-
-        if booking is None:
-            raise BookingNotFoundException()
-
-        if booking.customer_id != current_user.id:
-            raise PaymentAccessDeniedException()
-
-        if payment.payment_status == PaymentStatus.SUCCESS:
-            raise PaymentAlreadyCompletedException()
-
-        if payment.payment_status == PaymentStatus.FAILED:
-            raise PaymentAlreadyFailedException()
-
-        if not request.gateway_transaction_id:
-            raise PaymentVerificationFailedException()
-
-        payment.gateway_transaction_id = (
-            request.gateway_transaction_id
-        )
-
-        payment.gateway_response = (
-            request.gateway_response
-        )
-
-        payment.payment_status = PaymentStatus.SUCCESS
-
-        payment.paid_at = datetime.now(
-            timezone.utc,
-        )
-
-        payment.updated_by = current_user.id
-
-        booking.booking_status = BookingStatus.CONFIRMED
-        booking.payment_status = PaymentStatus.SUCCESS
-        booking.updated_by = current_user.id
-
-        existing_invoice = await self.repository.get_invoice_by_booking(
-            booking.id,
-        )
-
-        if existing_invoice is not None:
-            raise InvalidPaymentStatusException()
-        
-        invoice_number = (
-            await self.generate_invoice_number()
-        )
-
-        invoice = Invoice(
-            booking_id=booking.id,
-            invoice_number=invoice_number,
-            invoice_status=InvoiceStatus.GENERATED,
-            invoice_amount=payment.amount,
-            currency=payment.currency,
-            generated_at=datetime.now(timezone.utc),
-            created_by=current_user.id,
-            updated_by=current_user.id,
-        )
 
         try:
 
-            await self.repository.update_payment(
-                payment,
+            # ------------------------------------------------------------
+            # Retrieve Payment
+            # ------------------------------------------------------------
+
+            payment = await self.repository.get_payment_by_reference(
+                request.payment_reference,
+            )
+
+            if payment is None:
+                raise PaymentNotFoundException()
+
+            # ------------------------------------------------------------
+            # Validate Ownership
+            # ------------------------------------------------------------
+
+            if payment.user_id != current_user.id:
+                raise PaymentAccessDeniedException()
+
+            # ------------------------------------------------------------
+            # Validate Payment Status
+            # ------------------------------------------------------------
+
+            if (
+                payment.payment_status
+                == PaymentTransactionStatus.SUCCESS
+            ):
+                raise PaymentAlreadyCompletedException()
+
+            if (
+                payment.payment_status
+                == PaymentTransactionStatus.FAILED
+            ):
+                raise PaymentAlreadyFailedException()
+
+            # ------------------------------------------------------------
+            # Retrieve Booking
+            # ------------------------------------------------------------
+
+            booking = payment.booking
+
+            if booking is None:
+                raise BookingNotFoundException()
+
+            previous_booking_status = booking.booking_status
+
+            # ------------------------------------------------------------
+            # Complete Payment
+            # ------------------------------------------------------------
+
+            payment.payment_status = (
+                PaymentTransactionStatus.SUCCESS
+            )
+
+            payment.gateway_payment_id = (
+                request.gateway_payment_id
+            )
+
+            payment.gateway_response = (
+                request.gateway_response
+            )
+
+            payment.paid_at = datetime.now(
+                timezone.utc,
+            )
+
+            payment.updated_by = current_user.email
+
+            # ------------------------------------------------------------
+            # Update Booking
+            # ------------------------------------------------------------
+
+            booking.payment_status = (
+                BookingPaymentStatus.SUCCESS
+            )
+
+            booking.booking_status = (
+                BookingStatus.CONFIRMED
+            )
+
+            booking.updated_by = current_user.email
+
+            # ------------------------------------------------------------
+            # Create Booking History
+            # ------------------------------------------------------------
+
+            booking_history = BookingHistory(
+
+                booking_id=booking.id,
+
+                old_status=previous_booking_status,
+
+                new_status=BookingStatus.CONFIRMED,
+
+                changed_by=current_user.id,
+
+                remarks="Payment completed successfully.",
+
+                created_by=current_user.email,
+
+                updated_by=current_user.email,
+
+            )
+
+            await self.repository.create_booking_history(
+                booking_history,
+            )
+
+            # ------------------------------------------------------------
+            # Generate Invoice
+            # ------------------------------------------------------------
+
+            invoice = Invoice(
+
+                booking_id=booking.id,
+
+                invoice_number=await self.generate_invoice_number(),
+
+                invoice_status=InvoiceStatus.GENERATED,
+
+                invoice_amount=payment.amount,
+
+                currency=payment.currency,
+
+                generated_at=datetime.now(
+                    timezone.utc,
+                ),
+
+                created_by=current_user.email,
+
+                updated_by=current_user.email,
+
             )
 
             await self.repository.create_invoice(
                 invoice,
             )
 
+            # ------------------------------------------------------------
+            # Update Payment
+            # ------------------------------------------------------------
+
+            payment = await self.repository.update_payment(
+                payment,
+            )
+
+            # ------------------------------------------------------------
+            # Commit Transaction
+            # ------------------------------------------------------------
+
             await self.db.commit()
+
+            await self.db.refresh(
+                payment,
+            )
+
+            await self.db.refresh(
+                booking,
+            )
+
+            # ------------------------------------------------------------
+            # Return Response
+            # ------------------------------------------------------------
+
+            return PaymentResponse(
+
+                id=payment.id,
+
+                booking_id=payment.booking_id,
+
+                payment_reference=payment.payment_reference,
+
+                amount=payment.amount,
+
+                currency=payment.currency,
+
+                payment_method=payment.payment_method,
+
+                payment_gateway=payment.payment_gateway,
+
+                payment_status=payment.payment_status,
+
+                gateway_order_id=payment.gateway_order_id,
+
+                gateway_payment_id=payment.gateway_payment_id,
+
+                paid_at=payment.paid_at,
+
+                created_at=payment.created_at,
+
+            )
 
         except Exception:
 
@@ -294,21 +453,105 @@ updated_by=current_user.email
 
             raise
 
-        return PaymentResponse(
-            id=payment.id,
-            booking_id=payment.booking_id,
-            payment_reference=payment.payment_reference,
-            amount=payment.amount,
-            currency=payment.currency,
-            payment_method=payment.payment_method,
-            payment_gateway=payment.payment_gateway,
-            payment_status=payment.payment_status,
-            gateway_transaction_id=payment.gateway_transaction_id,
-            gateway_response=payment.gateway_response,
-            refund_status=payment.refund_status,
-            refund_amount=payment.refund_amount,
-            paid_at=payment.paid_at,
-        )
+    # ============================================================
+    # Fail Payment
+    # ============================================================
+
+    async def fail_payment(
+        self,
+        request: PaymentFailureRequest,
+        current_user: User,
+    ) -> PaymentMessageResponse:
+        """
+        Marks a pending payment as failed.
+        """
+
+        try:
+
+            # ------------------------------------------------------------
+            # Retrieve Payment
+            # ------------------------------------------------------------
+
+            payment = await self.repository.get_payment_by_reference(
+                request.payment_reference,
+            )
+
+            if payment is None:
+                raise PaymentNotFoundException()
+
+            # ------------------------------------------------------------
+            # Validate Ownership
+            # ------------------------------------------------------------
+
+            if payment.user_id != current_user.id:
+                raise PaymentAccessDeniedException()
+
+            # ------------------------------------------------------------
+            # Validate Payment Status
+            # ------------------------------------------------------------
+
+            if (
+                payment.payment_status
+                == PaymentTransactionStatus.SUCCESS
+            ):
+                raise PaymentAlreadyCompletedException()
+
+            if (
+                payment.payment_status
+                == PaymentTransactionStatus.FAILED
+            ):
+                raise PaymentAlreadyFailedException()
+
+            # ------------------------------------------------------------
+            # Update Payment
+            # ------------------------------------------------------------
+
+            payment.payment_status = (
+                PaymentTransactionStatus.FAILED
+            )
+
+            payment.failure_reason = (
+                request.failure_reason
+            )
+
+            payment.gateway_response = (
+                request.gateway_response
+            )
+
+            payment.updated_by = current_user.email
+
+            # ------------------------------------------------------------
+            # Save Changes
+            # ------------------------------------------------------------
+
+            payment = await self.repository.update_payment(
+                payment,
+            )
+
+            # ------------------------------------------------------------
+            # Commit Transaction
+            # ------------------------------------------------------------
+
+            await self.db.commit()
+
+            await self.db.refresh(
+                payment,
+            )
+
+            # ------------------------------------------------------------
+            # Return Response
+            # ------------------------------------------------------------
+
+            return PaymentMessageResponse(
+                message="Payment marked as failed successfully.",
+            )
+
+        except Exception:
+
+            await self.db.rollback()
+
+            raise
+
 
     # ============================================================
     # Get Payment By ID
@@ -320,7 +563,7 @@ updated_by=current_user.email
         current_user: User,
     ) -> PaymentResponse:
         """
-        Retrieves a payment by its ID.
+        Retrieve a payment by its ID.
         """
 
         payment = await self.repository.get_payment_by_id(
@@ -330,30 +573,150 @@ updated_by=current_user.email
         if payment is None:
             raise PaymentNotFoundException()
 
-        booking = await self.repository.get_booking_by_id(
-            payment.booking_id,
+        if payment.user_id != current_user.id:
+            raise PaymentAccessDeniedException()
+
+        return PaymentResponse(
+
+            id=payment.id,
+
+            booking_id=payment.booking_id,
+
+            payment_reference=payment.payment_reference,
+
+            amount=payment.amount,
+
+            currency=payment.currency,
+
+            payment_method=payment.payment_method,
+
+            payment_gateway=payment.payment_gateway,
+
+            payment_status=payment.payment_status,
+
+            gateway_order_id=payment.gateway_order_id,
+
+            gateway_payment_id=payment.gateway_payment_id,
+
+            paid_at=payment.paid_at,
+
+            created_at=payment.created_at,
+
         )
+
+    # ============================================================
+    # Get Payment By Reference
+    # ============================================================
+
+    async def get_payment_by_reference(
+        self,
+        payment_reference: str,
+        current_user: User,
+    ) -> PaymentResponse:
+        """
+        Retrieve a payment using its payment reference.
+        """
+
+        payment = await self.repository.get_payment_by_reference(
+            payment_reference,
+        )
+
+        if payment is None:
+            raise PaymentNotFoundException()
+
+        if payment.user_id != current_user.id:
+            raise PaymentAccessDeniedException()
+
+        return PaymentResponse(
+
+            id=payment.id,
+
+            booking_id=payment.booking_id,
+
+            payment_reference=payment.payment_reference,
+
+            amount=payment.amount,
+
+            currency=payment.currency,
+
+            payment_method=payment.payment_method,
+
+            payment_gateway=payment.payment_gateway,
+
+            payment_status=payment.payment_status,
+
+            gateway_order_id=payment.gateway_order_id,
+
+            gateway_payment_id=payment.gateway_payment_id,
+
+            paid_at=payment.paid_at,
+
+            created_at=payment.created_at,
+
+        )
+
+    # ============================================================
+    # Get Invoice By Booking
+    # ============================================================
+
+    async def get_invoice_by_booking(
+        self,
+        booking_id: UUID,
+        current_user: User,
+    ) -> InvoiceResponse:
+        """
+        Retrieve the invoice associated with a booking.
+        """
+
+        # ------------------------------------------------------------
+        # Retrieve Invoice
+        # ------------------------------------------------------------
+
+        invoice = await self.repository.get_invoice_by_booking_id(
+            booking_id,
+        )
+
+        if invoice is None:
+            raise InvoiceNotFoundException()
+
+        # ------------------------------------------------------------
+        # Validate Booking
+        # ------------------------------------------------------------
+
+        booking = invoice.booking
 
         if booking is None:
             raise BookingNotFoundException()
 
-        if booking.customer_id != current_user.id:
+        # ------------------------------------------------------------
+        # Validate Ownership
+        # ------------------------------------------------------------
+
+        if booking.user_id != current_user.id:
             raise PaymentAccessDeniedException()
 
-        return PaymentResponse(
-            id=payment.id,
-            booking_id=payment.booking_id,
-            payment_reference=payment.payment_reference,
-            amount=payment.amount,
-            currency=payment.currency,
-            payment_method=payment.payment_method,
-            payment_gateway=payment.payment_gateway,
-            payment_status=payment.payment_status,
-            gateway_transaction_id=payment.gateway_transaction_id,
-            gateway_response=payment.gateway_response,
-            refund_status=payment.refund_status,
-            refund_amount=payment.refund_amount,
-            paid_at=payment.paid_at,
+        # ------------------------------------------------------------
+        # Return Response
+        # ------------------------------------------------------------
+
+        return InvoiceResponse(
+
+            id=invoice.id,
+
+            booking_id=invoice.booking_id,
+
+            invoice_number=invoice.invoice_number,
+
+            invoice_status=invoice.invoice_status,
+
+            invoice_amount=invoice.invoice_amount,
+
+            currency=invoice.currency,
+
+            generated_at=invoice.generated_at,
+
+            created_at=invoice.created_at,
+
         )
 
     # ============================================================
@@ -365,7 +728,7 @@ updated_by=current_user.email
         current_user: User,
     ) -> list[PaymentSummaryResponse]:
         """
-        Retrieves all payments for the authenticated customer.
+        Retrieve all payments made by the current user.
         """
 
         payments = await self.repository.get_my_payments(
@@ -373,59 +736,34 @@ updated_by=current_user.email
         )
 
         return [
+
             PaymentSummaryResponse(
+
                 id=payment.id,
+
                 booking_id=payment.booking_id,
+
                 payment_reference=payment.payment_reference,
+
                 amount=payment.amount,
+
                 currency=payment.currency,
+
                 payment_method=payment.payment_method,
+
                 payment_gateway=payment.payment_gateway,
+
                 payment_status=payment.payment_status,
+
                 paid_at=payment.paid_at,
+
+                created_at=payment.created_at,
+
             )
+
             for payment in payments
+
         ]
-
-    # ============================================================
-    # Download Invoice
-    # ============================================================
-
-    async def download_invoice(
-        self,
-        booking_id: UUID,
-        current_user: User,
-    ) -> InvoiceResponse:
-        """
-        Retrieves the invoice for a booking.
-        """
-
-        booking = await self.repository.get_booking_by_id(
-            booking_id,
-        )
-
-        if booking is None:
-            raise BookingNotFoundException()
-
-        if booking.customer_id != current_user.id:
-            raise PaymentAccessDeniedException()
-
-        invoice = await self.repository.get_invoice_by_booking(
-            booking_id,
-        )
-
-        if invoice is None:
-            raise InvoiceNotFoundException()
-
-        return InvoiceResponse(
-            id=invoice.id,
-            booking_id=invoice.booking_id,
-            invoice_number=invoice.invoice_number,
-            invoice_status=invoice.invoice_status,
-            currency=invoice.currency,
-            invoice_amount=invoice.invoice_amount,
-            generated_at=invoice.generated_at,
-        )
 
     # ============================================================
     # Get Property Payments
@@ -436,7 +774,7 @@ updated_by=current_user.email
         current_user: User,
     ) -> list[PaymentSummaryResponse]:
         """
-        Retrieves all payments for properties owned by the authenticated user.
+        Retrieve all payments received for the current owner's properties.
         """
 
         payments = await self.repository.get_property_payments(
@@ -444,22 +782,37 @@ updated_by=current_user.email
         )
 
         return [
+
             PaymentSummaryResponse(
+
                 id=payment.id,
+
                 booking_id=payment.booking_id,
+
                 payment_reference=payment.payment_reference,
+
                 amount=payment.amount,
+
                 currency=payment.currency,
+
                 payment_method=payment.payment_method,
+
                 payment_gateway=payment.payment_gateway,
+
                 payment_status=payment.payment_status,
+
                 paid_at=payment.paid_at,
+
+                created_at=payment.created_at,
+
             )
+
             for payment in payments
+
         ]
 
     # ============================================================
-    # Revenue Summary
+    # Get Revenue Summary
     # ============================================================
 
     async def get_revenue_summary(
@@ -467,96 +820,21 @@ updated_by=current_user.email
         current_user: User,
     ) -> RevenueSummaryResponse:
         """
-        Retrieves the revenue summary for properties owned by the authenticated user.
+        Retrieve the revenue summary for the current property owner.
         """
 
-        (
-            total_payments,
-            total_revenue,
-            total_refunds,
-        ) = await self.repository.get_revenue_summary(
+        summary = await self.repository.get_revenue_summary(
             current_user.id,
         )
 
         return RevenueSummaryResponse(
-            total_payments=total_payments,
-            total_revenue=Decimal(total_revenue),
-            total_refunds=Decimal(total_refunds),
-            net_revenue=Decimal(total_revenue)
-            - Decimal(total_refunds),
-        )
 
-    # ============================================================
-    # Process Refund
-    # ============================================================
+            total_payments=summary["total_payments"],
 
-    async def process_refund(
-        self,
-        payment_id: UUID,
-        request: RefundRequest,
-        current_user: User,
-    ) -> PaymentResponse:
-        """
-        Processes a refund for a payment.
-        """
+            total_revenue=summary["total_revenue"],
 
-        payment = await self.repository.get_payment_by_id(
-            payment_id,
-        )
+            average_payment_amount=summary[
+                "average_payment_amount"
+            ],
 
-        if payment is None:
-            raise PaymentNotFoundException()
-
-        if payment.payment_status != PaymentStatus.SUCCESS:
-            raise RefundNotAllowedException()
-
-        if payment.refund_status == RefundStatus.COMPLETED:
-            raise RefundAlreadyProcessedException()
-
-        if request.refund_amount > payment.amount:
-            raise InvalidRefundAmountException()
-
-        payment.refund_amount = request.refund_amount
-
-        payment.refund_status = RefundStatus.COMPLETED
-
-        payment.payment_status = PaymentStatus.REFUNDED
-
-        booking = await self.repository.get_booking_by_id(
-            payment.booking_id,
-        )
-
-        booking.payment_status = PaymentStatus.REFUNDED
-        booking.updated_by = current_user.id
-
-        payment.updated_by = current_user.id
-
-        try:
-
-            await self.repository.update_payment(
-                payment,
-            )
-
-            await self.db.commit()
-
-        except Exception:
-
-            await self.db.rollback()
-
-            raise
-
-        return PaymentResponse(
-            id=payment.id,
-            booking_id=payment.booking_id,
-            payment_reference=payment.payment_reference,
-            amount=payment.amount,
-            currency=payment.currency,
-            payment_method=payment.payment_method,
-            payment_gateway=payment.payment_gateway,
-            payment_status=payment.payment_status,
-            gateway_transaction_id=payment.gateway_transaction_id,
-            gateway_response=payment.gateway_response,
-            refund_status=payment.refund_status,
-            refund_amount=payment.refund_amount,
-            paid_at=payment.paid_at,
         )
